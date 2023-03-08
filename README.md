@@ -21,6 +21,6 @@ ___
 * Download all files (_Recommended_) 
 
 ## 3. Instructions
-* Codes are scripted to answer assignment questions in the Computational Biology course
-* Due to copyright issue, I can't post the original assignment here.
+* Codes are scripted to answer assignment questions in the Computational Biology course. In order to make sense of the code, you may need to see the original assigment questions. 
+* However, Due to the copyright issue, I can't post the original assignment here.
 * But if you wish to take a look, please refer to: https://dynalist.io/d/xx6b5k16RTE5kikWU_Md4rJX#z=qPRcGafcb1c5tZDS0sOtbL44
