@@ -1,0 +1,312 @@
+---
+title: "Stat35450_HW6"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Problem 1
+
+## Part (a)
+
+We first begin by finding the stationary distribution of the given Markov Chain:
+
+```{r}
+P<-matrix(c(0.1,0.35,0.3,0.6,0.8,0.1,0.2,0.1,0.05,0.1,0.2,0.25,0.05,0.45,0.3,0.05),nrow=4)
+P_eig = eigen(t(P))
+pi=P_eig$vectors[,1]/sum(P_eig$vectors[,1])
+```
+
+Then, the probability of observing TATA is (using time homegeneity):
+$$P(TATA) = P(T)P(A|T)P(T|A)P(A|T)$$
+```{r}
+p_TATA = pi[3]*P[3,1]*P[1,3]*P[3,1]
+p_TATA
+```
+
+
+## part (b)
+
+We run MC simulation 20,000 times and throw out the first 10,000 with the assumption that by this point it has reached the stationarity.
+
+```{r}
+# simulate discrete Markov chains according to transition matrix P
+run.mc.sim <- function( P, num.iters = 20000) {
+  # number of possible states
+  num.states <- nrow(P)
+  # stores the states X_t through time
+  states     <- numeric(num.iters)
+  # draw first state from stationary distribution 
+  states[1]    <- which(rmultinom(1, 1, pi) == 1)
+  for(t in 2:num.iters) {
+    # probability vector to simulate next state X_{t+1}
+    p  <- P[states[t-1], ]
+    ## draw from multinomial and determine state
+    states[t] <-  which(rmultinom(1, 1, p) == 1)
+  }
+  return(states)
+}
+```
+
+### Simulate 20000 bases
+```{r}
+mc_sim = run.mc.sim(P)
+```
+
+### Extract every 100th bases starting from 10100th simulation
+```{r}
+every_100 = seq(10100,length(mc_sim),100)
+mc_sim_100 = mc_sim[every_100]
+```
+
+### Monte Carlo estimate
+```{r}
+p_A=length(which(mc_sim_100==1))/length(mc_sim_100)
+p_C=length(which(mc_sim_100==2))/length(mc_sim_100)
+p_T=length(which(mc_sim_100==3))/length(mc_sim_100)
+p_G=length(which(mc_sim_100==4))/length(mc_sim_100)
+pi_emp_100 = c(p_A,p_C,p_T,p_G)
+pi_emp_100
+```
+
+Although the results slightly differ from each other every time we run the simulation, the estimate is close to the actual stationary distribution. Even after we reach stationarity, sampling every 100th from the remaining 10000 simulation gives you only 100 samples, resulting in noisy measure of the true stationary distribution.
+
+## Part (c)
+
+The implementation below generates the number of simulation it took for a single MC simulation to find 'AACC'. More specifically, the last 'C' in AACC sequence:
+
+```{r}
+mc.sim.aacc <- function(P, max.iters) {
+  # number of possible states
+  num.states <- nrow(P)
+  # stores the states X_t through time
+  states     <- numeric(max.iters)
+  # draw first state from stationary distribution 
+  initial_pi = c(0.25,0.25,0.25,0.25) # the very first base is equally likely to be A,C,T, or G
+  states[1]    <- which(rmultinom(1, 1, initial_pi) == 1)
+  AACC = c(1,1,2,2)
+  match = 0; t = 1
+  while (match != 1) {
+    t = t+1
+    # probability vector to simulate next state X_{t+1}
+    p  <- P[states[t-1], ]
+    ## draw from multinomial and determine state
+    states[t] <-  which(rmultinom(1, 1, p) == 1)
+    #aa = states[t-1:t]
+    if (t>=4){
+      if (all(AACC == states[(t-3):t])){
+        match =1
+      }
+    }
+  }
+  #print(length(states))
+  return(t)
+}
+```
+
+We can run the above function many time and average the results to estimate the number of simulations it takes to observe AACC sequence.
+
+```{r}
+iters = rep(0,10000)
+for (i in 1:10000){
+  num_iter = mc.sim.aacc(P,1000)
+  iters[i] = num_iter
+}
+mean(iters)
+```
+
+According to simulation, we need about `r mean(iters)` number of simulation in order to observe the last 'C' in AACC sequence.
+
+# Problem 2
+```{r}
+setwd("/Users/dongillee/Downloads")
+x = read.table("../Test_region_NOM37_methylation_C_in_GpC_hg38_chr9_131946471_134832670.bed.txt",stringsAsFactors = FALSE, header=FALSE)
+head(x)
+```
+
+```{r}
+#sum(x$V7>x$V8)
+#table(x$V7)
+#table(x$V8)
+m = 1*(x$V7>0)
+#head(m,100)
+```
+
+The transition probability matrix A is:
+
+$$
+   A=
+  \left[ {\begin{array}{cc}
+   0.957 & 0.043 \\
+   0.42 & 0.58 \\
+  \end{array} } \right]
+$$
+The emission probability matrix B, where rows corresponds to observed variables and columns the hidden states, is:
+
+$$
+   B=
+  \left[ {\begin{array}{cc}
+   0.933 & 0.549 \\
+   0.067 & 0.451 \\
+  \end{array} } \right]
+$$
+
+## Part (a)
+
+### Implement the forward algorithm:
+
+```{r}
+
+A <- matrix(c(0.957,0.42,0.043,0.58),nrow = 2)
+B <- matrix(c(0.933,0.067,0.549,0.451),nrow = 2)
+
+forward_HMM <- function(A,B,obs){
+  #alphas = matrix(0,length(obs),2)
+  log_alphas = matrix(0,length(obs),2)
+  #alphas[1,1] = 0.5*B[obs[1]+1,1] 
+  #paste("alphas[1,1] is: ",alphas[1,1])
+  #alphas[1,2] = 0.5*B[obs[1]+1,2]
+  log_alphas[1,1] = log(0.5*B[obs[1]+1,1]) 
+  #paste("log_alphas[1,1] is: ",log_alphas[1,1])
+  log_alphas[1,2] = log(0.5*B[obs[1]+1,2])
+  for (i in 2:length(obs)){
+    #alpha_C = (alphas[i-1,1]*A[1,1]+alphas[i-1,2]*A[2,1])*B[obs[1]+1,1]
+    #alpha_O = (alphas[i-1,1]*A[1,2]+alphas[i-1,2]*A[2,2])*B[obs[1]+1,2]
+    #alphas[i,1] = alpha_C; alphas[i,2] = alpha_O
+    for (j in 1:2){
+      b1 = log_alphas[i-1,1]+log(A[1,j]); b2 = log_alphas[i-1,2]+log(A[2,j])
+      b = max(b1,b2)
+      #print(b)
+      log_alpha = b + log(exp(b1-b)+exp(b2-b)) + log(B[obs[i]+1,j])
+      log_alphas[i,j] = log_alpha
+     # print(log_alphas)
+    }
+  }
+  return(log_alphas)
+}
+```
+
+### Compute the probability of the observed Potts data:
+
+We need to return the following quantity, which is the sum of the quantities the simulation is terminated with (we have last hidden state being either closed or open.
+
+```{r}
+log_alphas = forward_HMM(A,B,m)
+alpha_T_closed = log_alphas[length(m),1]
+alpha_T_open = log_alphas[length(m),2]
+print(alpha_T_closed)
+print(alpha_T_open)
+```
+
+The log-likelihood is as following:
+
+```{r}
+b = max(alpha_T_closed, alpha_T_open)
+log_likelihood = b + log(exp(alpha_T_closed-b)+exp(alpha_T_open-b))
+log_likelihood
+```
+
+### Perturb MLE values and see changes in likelihood:
+
+I perturb the A and B in such a way that the sum of probabilities is still zero:
+```{r}
+A <- matrix(c(0.94,0.45,0.06,0.55),nrow = 2)
+B <- matrix(c(0.91,0.09,0.6,0.4),nrow = 2)
+#Ap = A*0.9; Bp = A*0.9
+log_alphas2 = forward_HMM(A,B,m)
+# Print our the result:
+alpha_T_closed = log_alphas2[length(m),1]
+alpha_T_open = log_alphas2[length(m),2]
+print(alpha_T_closed)
+print(alpha_T_open)
+```
+
+The log-likelihood is as following:
+
+```{r}
+b = max(alpha_T_closed, alpha_T_open)
+log_likelihood = b + log(exp(alpha_T_closed-b)+exp(alpha_T_open-b))
+log_likelihood
+```
+
+The log-likelihood increased only by a very small number.
+
+## Part (b)
+
+The Viterbi_HMM function below returns two datasets, log_deltas and psis, which contain log of deltas at each stage and the state of the previous step that maximizes delta at the current state, respectively:
+
+```{r}
+
+A <- matrix(c(0.957,0.42,0.043,0.58),nrow = 2)
+B <- matrix(c(0.933,0.067,0.549,0.451),nrow = 2)
+
+Viterbi_HMM <- function(A,B,obs){
+  psis = matrix(0,length(obs)-1,2)
+  log_deltas = matrix(0,length(obs),2)
+  log_deltas[1,1] = log(0.5*B[obs[1]+1,1]) 
+  log_deltas[1,2] = log(0.5*B[obs[1]+1,2])
+  for (i in 2:length(obs)){
+    #print(i)
+    for (j in 1:2){
+      b1 = log_deltas[i-1,1]+log(A[1,j]); b2 = log_deltas[i-1,2]+log(A[2,j])
+      b = max(b1,b2) 
+      psi = which.max(c(b1,b2))
+      log_delta = b  + log(B[obs[i]+1,j])
+      log_deltas[i,j] = log_delta
+      psis[i-1,j] = psi
+     # print(log_alphas)
+    }
+  #which.max()  
+  }
+  data = list("log_deltas"=log_deltas,"psis"=psis)
+  return(data)
+}
+```
+
+We first figure out what final state maximizes the probability:
+
+```{r}
+data = Viterbi_HMM(A,B,m)
+final_state = which.max(data$log_deltas[length(m),])
+```
+
+We backtrack (iteratively find the previous state that maximizes the delta of the current state)
+
+```{r}
+psis = data$psis
+n = length(m)
+backtracked_states = rep(0,n)
+backtracked_states[n] = final_state
+state = final_state
+for (i in 1:(n-1)){
+  #print(i)
+  #print(i)
+  best_states = psis[n-i,]
+  backtracked_states[n-i]=best_states[backtracked_states[n-i+1]]
+}
+backtracked_states = backtracked_states -1
+```
+
+How similar are backtracked states and observation? Not surprisingly (as observation is noisy read of the hidden states), they are quite similar:
+
+```{r}
+sum(backtracked_states == m)/length(m)
+```
+
+Let's plot the first 600 backtracked states:
+
+```{r}
+plot(1:600,backtracked_states[1:600])
+```
+
+# Problem 3: Project idea
+
+I plan to present a teaching resource on Expectation Maximization (EM) that complements the introductory five minute stats vignette on a theoretical side. More specifically, I plan to provide a theoretical perspective on EM algorithm that helps readers understand that the algorithm achieves the following two-step procedure in each iteration (suppose we are at t+1 th iteration):
+* In step 1, update the distribution of the latent variable $P(z)$: 
+$P(z)^{(t+1)} \leftarrow P(z)^{(t)}$ by maximizing the lower bound of the likelihood $l(\theta)$ with respect to $P(z)$ with $\theta$ obtained from step 2 of the previous iteration.
+* In step 2, update the parameter $\theta$:
+$\theta^{(t+1)} \leftarrow \theta^{(t)}$ using $P(z)^{(t+1)}$ obtained in step 1.
+I'll present a set of simple proofs and reasoning to show that follwing this two-step procedure iteratively leads to monotonic increase and convergence of the likelihood (with possibly a mild and reasonable assumption about our models).   
+
+
+

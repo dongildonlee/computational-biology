@@ -1,0 +1,123 @@
+---
+title: "Stat35450_HW5"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## 2(b)
+
+You can also embed plots, for example:
+
+```{r}
+m_ <- function(t){
+  m = 0.1*(exp(0.01*t)-1)
+  return(m)
+}
+
+i = 1
+s = seq(from=0, to=1000, by=0.1)
+for (t in s){
+  i = i+1
+  if (qpois(0.01,m_(t))==1000){
+    print(m_(t))
+    print(s[i])
+  }
+}
+```
+
+The above output implies that at $\lambda=1076$,  $P(N(t)\leq1000)\approx0.01$ and that the solution $t$ is some number around 928. To solve for $t$ exacctly we can use uniroot function to solve $m = 1076 =  0.1(e^{0.01t}-1)$ for $t$.
+
+```{r}
+uniroot(function(x) 0.1*(exp(0.01*x)-1)-1076, lower = -1, upper = 929, tol = 1e-9)
+
+```
+
+Thus, the answer is $t \approx 928.4$
+
+
+## 2(d)
+
+```{r}
+m_ <- function(t){
+  m = 0.05*(exp(0.01*t)-exp(-0.01*t))
+  return(m)
+}
+
+i = 1
+s = seq(from=0, to=1000, by=0.1)
+for (t in s){
+  i = i+1
+  if (qpois(0.01,m_(t))==1000){
+    print(m_(t))
+    print(s[i])
+  }
+}
+```
+
+The above output implies that at $\lambda=1076$,  $P(N(t)\leq1000)\approx0.01$ and that the solution $t$ is some number around 998. To solve for $t$ exacctly we can use uniroot function to solve $m = 1076 =  0.05(e^{0.01t}-e^{-0.01t})$ for $t$.
+
+```{r}
+uniroot(function(x) 0.05*(exp(0.01*x)-exp(-0.01*x))-1076, lower = 997, upper = 999, tol = 1e-9)
+```
+
+
+Thus, the solution $t\approx997.7$
+
+
+## 3(b)
+
+For conveneience I let $\{0,1,2,3\}$ refers to ${A,C,T,G}$.We first define a function Pij_t that takes $i,j$ and $t$, where $i,j \in \{0,1,2,3\}$.
+
+```{r}
+Pij_t <- function(i,j,t){
+  mu = 0.2*10^-8
+  ft = (1 - exp(-mu*t))/4
+  if (i==j){
+    p_ij = 1 - ft
+  }
+  else if(i!=j){
+    p_ij = ft
+  }
+  return(p_ij)
+}
+
+```
+
+Now we can compute $P(AGG)$:
+
+```{r}
+sum = 0
+for (i in c(0,1,2,3)){
+  sum = sum + (Pij_t(i,0,6*10^6)^2)*(Pij_t(3,i,10^6))
+  #print(sum)
+}
+P_AGG = Pij_t(3,3,7*10^6)*sum
+P_AGG
+log(P_AGG)
+```
+
+Thus the desired log-likelihood is `r log(P_AGG)`.
+
+## 3(c)
+
+```{r}
+sum = 0
+for (i in c(0,1,2,3)){
+  sum = sum + Pij_t(0,i,10^6)*Pij_t(i,0,6*10^6)*Pij_t(i,3, 6*10^6)
+  #print(sum)
+}
+P_AGA = Pij_t(0,0,7*10^6)*sum
+P_AGA
+log(P_AGA)
+```
+
+
+## 3(d)
+
+Which tree is favored? Based on the above outputs, P_AGA model (from (c)) is favored over P_AGG model because the log of P_AGA is less negative than that of P_AGG. The difference in log-likelihood unit is:
+
+```{r}
+log(P_AGA) - log(P_AGG)
+```
+This results contradicts our knowledge that Chimpanzees are closer relatives to humans than Gorillas.Therefore, there needs to be more data collection to see if that changes the result in a way that's consistent with our knowledge.

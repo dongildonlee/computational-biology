@@ -1,0 +1,384 @@
+---
+title: "Stat35450_HW7"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# A: Brownian Motion
+
+## Write code to simulate X(t_k).
+
+```{r}
+sim_brown <- function(t){
+  k = length(t)
+  order_t = t[order(t)] # this could be redundancy but just to make sure it's order statistics
+  diff = diff(order_t)
+  diff = append(diff, order_t[1], 0)
+  X_ts = rep(0,k+1)
+  for (i in 2:k+1){
+    X_t = rnorm(1,mean = X_ts[i-1], sd = sqrt(diff[i-1]))
+    #paste("X_t: ",X_t)
+    X_ts[i] = X_t
+  }
+  #X_t = rnorm(k,mean = 0, sd = sqrt(diff))
+  return(X_ts)
+  }
+```
+
+## Show a plot of t vs. X(t)
+
+```{r}
+t = runif(1000)
+t = t[order(t)]
+X_t = sim_brown(t)
+#print(X_t)
+plot(t,X_t[2:1001])
+```
+
+## Expression for the log likelihood for sigma given data
+
+Since $X_{i} - X_{i-1} \sim N(0, t_{i}-t_{i-1})$ and independent,
+
+$$ P(\sigma|X(t_{1}),...,X(t_{k})) = \prod_{i=1}^{k}f(x=X(t_i)-X(t_{i-1})|\theta_{i})$$
+where 
+$$f(x|\theta_{i}) = \frac{1}{\sigma\sqrt2\pi}e^{-\frac{x^2}{2\sigma^{2}(t_{i}-t_{i-1})}}$$
+and
+$$X(0) = 0 $$
+Thus, the log-likelihood is:
+$$ logP(\sigma|X(t_{1}),...,X(t_{k})) = \sum_{i=1}^{k}logf(x=X(t_i)-X(t_{i-1})|\theta_{i}) $$
+Compute the log likelihood:
+
+We first define a function that takes sigma and returns log-likelihood:
+```{r}
+diff_t = diff(t)
+diff_Xt = diff(X_t[2:1001])
+
+log_like <- function(diff_t, diff_Xt, sigma){
+    log_p = dnorm(diff_Xt, mean = 0, sd = sigma*sqrt(diff_t), log = TRUE)
+    log_like = sum(log_p)
+    return(log_like)
+  }
+```
+
+We now compute log-likelihood for many different sigmas
+
+```{r}
+diff_t = diff(t)
+diff_Xt = diff(X_t[2:1001])
+sigmas = seq(0.5,5,0.01)
+
+log_likes = rep(0,length(sigmas))
+for (i in 1:length(sigmas)){
+  log_likes[i] = log_like(diff_t, diff_Xt, sigmas[i])
+}
+```
+
+```{r}
+plot(sigmas,log_likes)
+```
+
+MLE of $\sigma$. Reading the sigma value that maximizes the log-likelihood from the plot, we get:
+
+```{r}
+MLE_sigma = sigmas[which.max(log_likes)]
+MLE_sigma
+```
+
+# Tree
+
+## Write code to simulate the value of (X_i, X_L)
+
+```{r}
+t = c(0.8,0.3,0.7,0.5,0.9,1.5)
+# parent info
+i_pa = c(4,3,5,5,6); L_pa = c(4,3,2,1,6,2,1)
+X_i = rep(0,6); X_L = rep(0,7)
+
+# simulate X_i, takes parent info and t vector as input 
+sim_Xi <- function(pa,t){
+  n = length(t)
+  X_is = rep(0,n)
+  i = n-1
+  while (i != 0){
+    #print(paste("parent of ",i,"th element is ", pa[i]))
+    num_steps = pa[i] - i 
+    elapsed_t = sum(t[(i+1):(i+num_steps)])
+    #print(paste(i,"th element's parent is :", pa[i]))
+    #print(paste("t for ",i,"th element is: ", elapsed_t))
+    X_i = rnorm(1,mean = X_is[pa[i]], sd = sqrt(elapsed_t))
+    X_is[i] = X_i
+    i=i-1
+  }
+  return(X_is)
+}
+
+# simulate X_L, takes parent info and values of the internal nodes X_i
+sim_XL <- function(X_is,pa,t){
+  n = length(pa)
+  X_Ls = rep(0,n)
+  i = 1
+  while (i != n+1){
+    #print(paste("parent of ",i,"th element is ", pa[i]))
+    num_steps = pa[i] 
+    elapsed_t = sum(t[1:num_steps])
+    #print(paste(i,"th element's parent is :", pa[i]))
+    #print(paste("t for ",i,"th element is: ", elapsed_t))
+    X_L = rnorm(1,mean = X_is[pa[i]], sd = sqrt(elapsed_t))
+    X_Ls[i] = X_L
+    i=i+1
+  }
+  return(X_Ls)
+}
+```
+
+Simulating $(X^{i},X^{L})$,
+
+```{r}
+X_is = sim_Xi(i_pa,t)
+X_Ls = sim_XL(X_is,L_pa,t)
+X_is_Ls = c(X_is,X_Ls)
+X_is_Ls
+```
+
+There are many ways to construct matrix A but below is one instance of them, using the following definition of $Z_{i}$, each referring to a connection from a node to a node:
+
+* $Z_{1}: X^{i}_6 - X^{L}_{5}$
+* $Z_{2}: X^{i}_6 - X^{i}_{5}$
+* $Z_{3}: X^{i}_5 - X^{i}_{3}$
+* $Z_{4}: X^{i}_5 - X^{i}_{4}$
+* $Z_{5}: X^{i}_3 - X^{i}_{2}$
+* $Z_{6}: X^{i}_4 - X^{i}_{1}$
+* $Z_{7}: X^{i}_4 - X^{L}_{1}$
+* $Z_{8}: X^{i}_1 - X^{L}_{4}$
+* $Z_{9}: X^{i}_1 - X^{L}_{7}$
+* $Z_{10}: X^{i}_3 - X^{L}_{2}$
+* $Z_{11}: X^{i}_2 - X^{L}_{3}$
+* $Z_{12}: X^{i}_2 - X^{L}_{6}$
+
+```{r}
+i1 = c(0,1,0,1,0,3,0,0,0,0,0,0)
+i2 = c(0,1,2,0,1,0,0,0,0,0,0,0)
+i3 = c(0,1,2,0,0,0,0,0,0,0,0,0)
+i4 = c(0,1,0,1,0,0,0,0,0,0,0,0)
+i5 = c(0,1,0,0,0,0,0,0,0,0,0,0)
+L1 = c(i4[1:6],4,i4[8:12])
+L2 = c(i3[1:9],3,i3[11:12])
+L3 = c(i2[1:10],2,i2[12])
+L4 = c(i1[1:7],1,i3[9:12])
+L5 = c(6,0,0,0,0,0,0,0,0,0,0,0)
+L6 = c(i2[1:11],2)
+L7 = c(i1[1:8],1,i1[10:12])
+
+A = sqrt(rbind(i1,i2,i3,i4,i5,L1,L2,L3,L4,L5,L6,L7))
+cov = A%*%t(A)
+cov
+```
+
+Let's do simulation to see if the above Cov matrix agrees with the simulation result.
+First create data of size 10000:
+```{r}
+t = rep(1,6)
+data <- matrix(0,10000,13)
+for (i in 1:10000){
+  X_is = sim_Xi(i_pa,t)
+  X_Ls = sim_XL(X_is,L_pa,t)
+  X_is = X_is
+  X_is_Ls = c(X_is,X_Ls)
+  X_is_Ls
+  data[i,] = X_is_Ls
+}
+```
+
+
+Compute covariance matrix from the simulated data:
+```{r}
+data <- data[,-6]
+sim_cov = cov(data)
+sim_cov 
+```
+
+Theoretical and simulated Covariance matrix roughly agree. How similar are they? We can subtract one from the other as a measure of similarity. As shown below they are very close.
+
+```{r}
+sim_cov - cov
+```
+
+Compute the precision matrix for $(X^{i}, X^{L})$
+```{r}
+solve(sim_cov)
+```
+
+Compute the covariance matrix and its inverse for $X^{i}$ (Excluding the root node $X_{6}^{i}$)
+```{r}
+data_Xi = data[,1:5]
+cov_Xi = cov(data_Xi)
+cov_Xi
+inv_covXi = solve(cov_Xi)
+inv_covXi
+```
+
+Compute the covariance matrix and its inverse for $X^{L}$ 
+```{r}
+data_XL = data[,7:12]
+cov_XL = cov(data_XL)
+cov_XL
+inv_covXL = solve(cov_XL)
+inv_covXL
+```
+
+
+Relate the sparsity patterns you see in the precision matrices to what you know about Gaussian Graphical Models:
+
+We know that $X_{ij}$ of the precision matrix is 0 if $X_{i}$ and $X_{j}$ are conditionally independent given all other coordinates. This implies that all $X_{ij}\approx 0$ except when 1. $i$ and $j$ have parent-child relationship or 2. $i=j$. This is indeed what we see in the precision matrix.
+
+
+# B: Spatial Gaussian Processes
+
+## Load the data
+
+```{r}
+setwd("/Users/dongillee/Downloads")
+ccr5 = read.table("../CCR5.freq.txt",header=TRUE)
+ccr5[,1] = ifelse(ccr5[,1]>180,ccr5[,1]-360,ccr5[,1]) # changes longitudes>180 to negative
+```
+
+
+## 
+```{r}
+ccr5$count = round(ccr5$Freq* ccr5$SampleSize * 2)
+ccr5$fhat = (ccr5$count+1)/(ccr5$SampleSize*2+2)
+ccr5$Z = log(ccr5$fhat/(1-ccr5$fhat))
+hist(ccr5$Z)
+```
+
+## Write a function to compute the cov matrix for x_obs.
+```{r}
+cov_xobs <- function(a){
+  geo.dist = geosphere::distm(ccr5[,1:2])/1000
+  y = cbind(ccr5$Long, ccr5$Lat)
+  n = dim(y)[1]
+  covs = matrix(0,n,n)
+  for (i in 1:n){
+    for (j in 1:n){
+      covs[i,j] = a[1]*exp(-(geo.dist[i,j]/a[2])^2)
+    }
+  }
+  cov = matrix(covs,n,n,byrow = TRUE)
+  return(cov)
+}
+```
+
+## Try a few values of a and check that the resulting cov matrix is valid.
+
+```{r}
+a = c(3,200)
+covv = cov_xobs(a)
+eig = eigen(covv)
+eig$values
+```
+
+## Write a function to compute the log-likelihood for the data x_obs
+
+```{r}
+log_like_obs <- function(par){
+  a1 = par[1]; a2 = par[2]; m = par[3] 
+  a = c(a1,a2)
+  cov = cov_xobs(a)
+  x_obs = ccr5$Z
+  r = length(x_obs)
+  mvtnorm::dmvnorm(x_obs, mean = rep(m,r), sigma = sqrt(cov), log = TRUE)
+}
+```
+
+## Try using R function optim to optimize the likelihood numerically
+
+```{r warning=FALSE}
+opt = optim(c(100,150,100), log_like_obs, control=list(fnscale=-1))
+opt$par
+```
+
+## Write a function to compute the conditional expectation of X_1 given X_2,...,X_r
+
+```{r}
+cond_exp <- function(vec, mu, cov){
+  n = length(vec)
+  mu1 = mu[1]
+  mu2 = mu[2:n]
+  a = vec[2:n]
+  cov12 = cov[1,2:n]
+  cov22 = cov[2:n,2:n]
+  mu_bar = mu1 + cov12%*%solve(cov22)%*%(a-mu2)
+  #print(paste("cov12: ", cov12)); print(paste("cov22: ", cov22))
+  #print(paste("cov12%*%solve(cov22)%*%(a-mu2) is: ", cov12%*%solve(cov22)%*%(a-mu2)))
+  return(mu_bar)
+} 
+```
+
+## Apply this function to compute conditional expectation for x(y_1)
+
+### Does expectation computation weight the nearby data points more?
+Since we're computing only the one value,$E(x(y_{1})|x(y_{2}),...,x(y_{r}))$ which happens to be the first value that do not have 'neighbors' in front of it, it is not so clear if this statement holds for my observation. From the below experiment where we compute expectation for r points, it wasn't also clear to me if this statement hold (possibly due to an implementation error in Kriging imputation)
+
+```{r}
+x_obs = ccr5$Z
+n = length(x_obs)
+a1 = opt$par[1]; a2 = opt$par[2]; m = opt$par[3] 
+mu = rep(m, n)
+covar = cov_xobs(c(a1,a2))
+cond_exp(x_obs, mu, covar)
+```
+
+## Repeat this for each of the r datapoints
+
+```{r}
+setwd("/Users/dongillee/Downloads")
+ccr5 = read.table("../CCR5.freq.txt",header=TRUE)
+ccr5[,1] = ifelse(ccr5[,1]>180,ccr5[,1]-360,ccr5[,1]) # changes longitudes>180 to negative
+ccr5$count = round(ccr5$Freq* ccr5$SampleSize * 2)
+ccr5$fhat = (ccr5$count+1)/(ccr5$SampleSize*2+2)
+ccr5$Z = log(ccr5$fhat/(1-ccr5$fhat))
+
+a1 = opt$par[1]; a2 = opt$par[2]; m = opt$par[3] 
+imputed_xis = rep(0,n)
+for (i in 1:n){
+  new_ccr5 = ccr5
+  # swap 1st and ith x
+  new_ccr5[1,] = ccr5[i,]
+  new_ccr5[i,] = ccr5[1,]
+  x_obs = new_ccr5$Z
+  covar = cov_xobs(c(a1,a2))
+  #vec = replace(x_obs, c(1, i), x[c(i, 1)]) # switch the x_i to the first position
+  imputed_xi = cond_exp(x_obs, mu, covar)
+  imputed_xis[i] = imputed_xi
+}
+
+```
+
+## How does the accuracy of this imputation scheme compare with just using the mean inputation?
+```{r}
+setwd("/Users/dongillee/Downloads")
+ccr5 = read.table("../CCR5.freq.txt",header=TRUE)
+ccr5[,1] = ifelse(ccr5[,1]>180,ccr5[,1]-360,ccr5[,1]) # changes longitudes>180 to negative
+ccr5$count = round(ccr5$Freq* ccr5$SampleSize * 2)
+ccr5$fhat = (ccr5$count+1)/(ccr5$SampleSize*2+2)
+ccr5$Z = log(ccr5$fhat/(1-ccr5$fhat))
+x_obs = ccr5$Z
+
+mean_imputes = rep(0,n)
+for (i in 1:n){
+  mean_imputes[i] = mean(x_obs[-i])
+}
+
+mean_imputes
+```
+
+We can compute Euclidean distances of two imputed vector from x_obs to see which one did better:
+The result is that the kriging did slightly better than mean imputation as the result shows below.
+
+```{r}
+d1 = dist(rbind(imputed_xis, x_obs))
+d2 = dist(rbind(mean_imputes, x_obs))
+print(paste("d1 is: ", d1, "d2 is: ", d2))
+d1<d2
+```

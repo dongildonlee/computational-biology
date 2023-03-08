@@ -1,0 +1,458 @@
+---
+title: "Stat35450_CompBio_HW4"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Problem A
+
+```{r}
+target = function(x){
+  if(x<0){
+    return(0)}
+  else {
+    return(exp(-x))
+  }
+}
+```
+
+```{r}
+### Copy of easyMCMC fucntion from the lecture note 
+
+easyMCMC = function(niter, startval, proposalsd){
+  x = rep(0,niter)
+  x[1] = startval     
+  for(i in 2:niter){
+    currentx = x[i-1]
+    proposedx = rnorm(1,mean=currentx,sd=proposalsd) 
+    A = target(proposedx)/target(currentx)
+    if(runif(1)<A){
+      x[i] = proposedx       # accept move with probabily min(1,A)
+    } else {
+      x[i] = currentx        # otherwise "reject" move, and stay where we are
+    }
+  }
+  return(x)
+}
+
+```
+
+## Excercise 1: sampling from an exponential distribution using MCMC
+
+### a) how do different starting values affect the MCMC scheme?
+
+To see this I run the MCMC scheme 2 times with two extremely different starting values (keeping the other variables constant), 1 and 20 and see how they give different results:
+
+As shown on the line plot and histograms below, even when starting with unlikely value (x=20) the sampling will eventaully give a histogram that looks similar to the other one (starting with x=1). Although x=50 is an unlikely value for the probability density $y = e^{-x}$, the algorithm is very unlikely choose higher value in the next iteration than the previous x value and so the sampled value will eventually converge towards 0. However, when the proposed standard deviation was not set high enough, this convergence will take many more iterations to compensate for this; if not provided with large enough number of iterations, the resulting histogram might not resemble the true distribution.
+
+```{r}
+z1=easyMCMC(1000,1,1)
+z2=easyMCMC(1000,20,1)
+
+plot(z1,type="l")
+lines(z2,col=2)
+
+par(mfcol=c(2,1)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+hist(z1,breaks=seq(0,maxz,length=20))
+hist(z2,breaks=seq(0,maxz,length=20))
+
+```
+
+### b) what is the effect of having a bigger/smaller proposal standard deviation?
+
+To see this I run the MCMC scheme 2 times with two extremely different proposed standard deviations (keeping the other variables constant), 1 and 0.1 and see how they give different results:
+
+As shown on the line plot and histograms below, when the proposed standard deviation is not set high enough to "try out" the whole breadth of the true density in given number of iterations, the sampling process will be "sticky" (as Prof. Stephens described in class) in the sense that sampled values will be close to each other relative to the breadth of the density function. This may result in the histrogram that may not be very representative of the true density.
+
+```{r}
+z1=easyMCMC(1000,1,1)
+z2=easyMCMC(1000,1,0.1)
+
+plot(z1,type="l")
+lines(z2,col=2)
+
+par(mfcol=c(2,1)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+hist(z1,breaks=seq(0,maxz,length=20))
+hist(z2,breaks=seq(0,maxz,length=20))
+
+```
+
+### c) try changing the target function to the following
+
+#### i) What does this target look like? 
+
+As shown below, the resulting histograms look like bimodal distribution with two peaks. This result is obvious from the target function; A = target(proposedx)/target(currentx) will be simply 0 or 1 according to whether the proposed x value does not or does satify the following respectively:$0 < x < 1$ or $2 < x < 3$. Thus, any proposed value that satisfy this condition will be accepted with the probability of 1 and any value that does not satisfy this condition will be rejected with probability of 1.
+
+```{r}
+target = function(x){
+  
+  return((x>0 & x <1) + (x>2 & x<3))
+}
+```
+
+```{r}
+z1=easyMCMC(1000,0.5,1)
+z2=easyMCMC(1000,2,1)
+
+plot(z1,type="l")
+lines(z2,col=2)
+
+par(mfcol=c(2,1)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+hist(z1,breaks=seq(0,maxz,length=20))
+hist(z2,breaks=seq(0,maxz,length=20))
+
+```
+
+#### ii) What happens if the proposal sd is too small here? (try e.g. 1 and 0.1)
+
+As shown below, the histogram from the low stanadard deviation (0.1) experiment has only one side of the bimodal distribution. This is due to the "sticky sampling" prcoess mentioned above; when the standard deviation is not set high enough to explore the whole breadth of the density, the resulting sampling will not be very representative of the true density. In our example, when starting value was 0.5, the sticky sampling process may propose value slightly greater than 1 but this will unlikely be greater than 2 due to the very low standard deviation. Therefore, the proposed value will always be rejected and the sampling will fail to sample values between 2 and 3.  
+
+```{r}
+z1=easyMCMC(1000,0.5,1)
+z2=easyMCMC(1000,0.5,0.1)
+
+plot(z1,type="l")
+lines(z2,col=2)
+
+par(mfcol=c(2,1)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+hist(z1,breaks=seq(0,maxz,length=20))
+hist(z2,breaks=seq(0,maxz,length=20))
+
+```
+
+## Excercise 2: Esimating an allele frequency
+
+```{r}
+
+prior = function(p){
+  if((p<0) || (p>1)){  # || here means "or"
+    return(0)}
+  else{
+    return(1)}
+}
+
+likelihood = function(p, nAA, nAa, naa){
+  return(p^(2*nAA) * (2*p*(1-p))^nAa * (1-p)^(2*naa))
+}
+
+psampler = function(nAA, nAa, naa, niter, pstartval, pproposalsd){
+  p = rep(0,niter)
+  p[1] = pstartval
+  for(i in 2:niter){
+    currentp = p[i-1]
+    newp = currentp + rnorm(1,0,pproposalsd)
+    A = prior(newp)*likelihood(newp,nAA,nAa,naa)/(prior(currentp) * likelihood(currentp,nAA,nAa,naa))
+    if(runif(1)<A){
+      p[i] = newp       # accept move with probabily min(1,A)
+    } else {
+      p[i] = currentp        # otherwise "reject" move, and stay where we are
+    }
+  }
+  return(p)
+}
+
+```
+
+### Investigate how the starting point and proposal standard deviation affect the convergence of the algorithm.
+
+#### Starting point
+
+In the experiment below, I experimented with two different starting values, 0.5 and 0.1. Here I intentionally reduced the number of iterations to 1000 to see the effect more clearly. The fact that we have $n_{AA} = 50$ and $n_{Aa} = 21$ suggestes that $\theta = P(A)$ is probably slightly higher than 0.5. When the prior deviates a lot from this, say 0.1 as in the second experiment below, the resulting sampling is more biased towards this prior (as shown in higher posterior density for values between 0.1 and 0.5) than when the prior was closer to the true $\theta$. This can be compensated for by running the algorithm over more iterations.
+
+```{r}
+z1=psampler(50,21,29,1000,0.5,0.01)
+z2=psampler(50,21,29,1000,0.1,0.01)
+
+```
+
+```{r}
+
+par(mfcol=c(1,2)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+
+x=seq(0,1,length=1000)
+hist(z1,prob=T)
+lines(x,dbeta(x,122, 80)) 
+hist(z2,prob=T)
+lines(x,dbeta(x,122, 80))  # overlays beta density on histogram
+```
+
+#### Standard deviation
+
+In the experiment below, I set the standard deviation for the second experiment to be 1, instead of 0.01 as is the case for the first experiement. As can be seen from the second histogram, the resulting sampling fails to approximate the true distribution as closely as the original sampling with standard deviation of 0.1. The histogram suggests that the posterior probabilites close to the true $\theta$ have been oversampled whereas the posterior probabilities farther away from the true $\theta$ have been undersampled. This result is consistend with our intuition that when standard deviation is as large as 1, there will be a lot of instances where the proposed values (which is the proposed $\theta$) are very unlikely (as represented by the likelihood value); this unlikeliness will be represented as low value of A, resulting in higher chance for the rejection of he proposed values. This will result in the algorithm "over-staying" in the previous value and not sampling diverse posterior probabilities which is necessary for a close approximation to the true density.
+
+```{r}
+z1=psampler(50,21,29,1000,0.5,0.01)
+z2=psampler(50,21,29,1000,0.5,1)
+
+```
+
+```{r}
+
+par(mfcol=c(1,2)) #rather odd command tells R to put 3 graphs on a single page
+maxz=max(c(z1,z2))
+
+x=seq(0,1,length=1000)
+hist(z1,prob=T)
+lines(x,dbeta(x,122, 80)) 
+hist(z2,prob=T)
+lines(x,dbeta(x,122, 80))  # overlays beta density on histogram
+```
+
+## Excercise 3: Estimating an allele frequency and inbreeding coefficient
+
+### Write a short MCMC routine to sample from the joint distribution of f and p.
+
+```{r}
+
+prior_p = function(p){
+  if((p<0) || (p>1)){  # || here means "or"
+    return(0)}
+  else{
+    return(1)}
+}
+
+prior_f = function(f){
+  if((f<0) || (f>1)){  # || here means "or"
+    return(0)}
+  else{
+    return(1)}
+}
+
+likelihood = function(f, p, nAA, nAa, naa){
+  return ((f*p+(1-f)*p*p)^nAA * ((1-f)*2*p*(1-p))^nAa * (f*(1-p)+(1-f)*(1-p)*(1-p))^naa)
+}
+
+fpsampler = function(nAA, nAa, naa, niter, fstartval, pstartval, fproposalsd, pproposalsd){
+  f = rep(0,niter)
+  p = rep(0,niter)
+  f[1] = fstartval
+  p[1] = pstartval
+  for(i in 2:niter){
+    currentf = f[i-1]
+    currentp = p[i-1]
+    newf = currentf + rnorm(1,0,fproposalsd)
+    newp = currentp + rnorm(1,0,pproposalsd)
+    A = prior_f(newf)*prior_p(newp)*likelihood(newf,newp,nAA,nAa,naa)/(prior_f(currentf)*prior_p(currentp) * likelihood(currentf,currentp,nAA,nAa,naa))
+    if(runif(1)<A){
+      p[i] = newp
+      f[i] = newf       # accept move with probabily min(1,A)
+    } else {
+      p[i] = currentp   # otherwise "reject" move, and stay where we are
+      f[i] = currentf
+    }
+  }
+  return(list(f=f,p=p)) # return a "list" with two elements named f and p
+}
+
+```
+
+### Use this sample to obtain point estimates for f and p (e.g. using posterior means) and interval estimates for both f and p (e.g. 90% posterior credible intervals), when the data are nAA=50,nAa=21,naa=29.
+
+```{r}
+z = fpsampler(50,21,29,10000,0.5,0.5,0.01,0.01)
+
+par(mfcol=c(1,2)) 
+x=seq(0,1,length=1000)
+hist(z$f,prob=T)
+hist(z$p,prop=T)
+```
+
+
+
+#### point estimate of f and p
+
+```{r}
+mean(z$f)
+mean(z$p)
+median(z$f)
+median(z$p)
+```
+
+
+#### Interval estimate of f and p (90% credible intervals)
+```{r}
+# sort f and p in increasing order:
+sorted_f = sort(z$f, decreasing = FALSE)
+sorted_p = sort(z$p, decreasing = FALSE)
+
+# get index for the lower and upper bound for the 90% confidence interval:
+lb = length(sorted_f)*0.05+1
+ub = length(sorted_f)*0.95
+
+# Get the interval for f and p:
+CI_f = c(sorted_f[lb], sorted_f[ub])
+CI_p = c(sorted_p[lb], sorted_p[ub])
+
+CI_f
+CI_p
+
+```
+
+
+# Gibbs sampling for generic mictures
+
+## Provide a detailed outline of a Gibbs sampler to fit the model (This model is analogous to the Structure model without admixture, where k=2)
+
+The algorithm in outline:
+
+Iteratively:
+
+* sample $f_0$ and $f_1$ from $f | x, z$
+* sample $z$ from $z | x, \pi_0, f_0,f_1$
+* sample $\pi_0$ from $\pi_0 | z$
+
+These sampling method is derived from the proportionality expression of the posterior distribution of these variables in terms of the likelihood and the prior.
+
+For the parameter $f_0$ and $f_1$, we see that the posterior for the frequency of allele in each locus $f_{0j}$ and $f_{1j}$ is proportional to the product of uniform prior and binomial likelihood. Since this makes the posterior for the parameter $f_0$ and $f_1$ a beta distribution, we can sample from a beta distribution (using rbeta). What $\alpha$ and $\beta$ parameters to use in this beta distribution is based on our knowledge of $x$ and $z$; among all $n$ number of $x's$ that are currently labeled either 0 or 1, count the number of occurrences $x=0$ or $x=1$ and set $\alpha$ as such number of occurrences plus one and $\beta$ as n minus the number of occurrences plus one.
+
+From the posterior for $z$ we see that it depends on the four parameters $f_0, f_1, x, \pi_0$ and that we can sample $z_i$ independently. After computing the likelihood independent of the information of $\pi_0$, we can weight the probability of $z$ using our knowledge of $\pi_0$. We see from the posterior expression for $z$ that  it should be proportional to this weighted lieklihood, which implies we can use this as our conditional probability of $z$ given parameters $f_0, f_1, x, \pi_0$. Using these probabilities that are defined for each datapoint $x_i$, we can sample $z_i$ accordingly. 
+
+Finally, to sample $\pi_0$, we note that the only parameter we need is $z$ (other than $k=2$ which we assume to know). We see that from the posterior for $\pi_0$ that it is a beta distribution. Using our updated estimates about the number of each classes in the dataset, we can sample from the dirichlet distribution (using rdirichlet) with k=2, which makes it a beta distribution.
+
+Iterating these samplings many times, we can estimate the joint distribution of the unknown parameters $f_0, f_1, z$ and $\pi_0$.
+
+
+```{r}
+
+#' @param x an R vector of data
+#' @param f a K by R matrix of allele frequencies
+#' @return the log-likelihood for each of the K populations
+log_pr_x_given_f = function(x,f){
+  tf = t(f) #transpose f so tf is R by K
+  return(colSums(x*log(tf)+(1-x)*log(1-tf)))
+}
+
+normalize = function(x){return(x/sum(x))} #used in sample_z below
+
+#' @param x an n by R matrix of data
+#' @param f a K by R matrix of allele frequencies
+#' @return an n vector of group memberships
+sample_z = function(x,f,pi){
+  K = nrow(f)
+  loglik_matrix = apply(x, 1, log_pr_x_given_f, f=f)
+  lik_matrix = exp(loglik_matrix) 
+  weighted_lik_matrix =  as.vector(pi)*lik_matrix
+  p.z.given.x = apply(weighted_lik_matrix,2,normalize) # normalize columns
+  z = rep(0, nrow(x))
+  for(i in 1:length(z)){
+    z[i] = sample(1:K, size=1,prob=p.z.given.x[,i],replace=TRUE)
+  }
+  return(z)
+}
+
+
+#' @param x an n by R matrix of data
+#' @param z an n vector of cluster allocations
+#' @return a 2 by R matrix of allele frequencies
+sample_f = function(x, z){
+  R = ncol(x)
+  f = matrix(ncol=R,nrow=2)
+  for(i in 1:2){
+    sample_size = sum(z==i)
+    if(sample_size==0){
+      number_of_ones=rep(0,R) 
+    } else {
+      number_of_ones = colSums(x[z==i,])
+    }
+    f[i,] = rbeta(R,1+number_of_ones,1+sample_size-number_of_ones) 
+  }
+  return(f)
+}
+
+sample_pi = function(z,k=2){
+    counts = colSums(outer(z,1:k,FUN="=="))
+    pi = gtools::rdirichlet(1,counts+1)
+    return(pi)
+  }
+
+gibbs = function(x,niter = 100){
+  pi = rep(1/2,2) #initialize pi
+  f0 = runif(ncol(x));  f1 = runif(ncol(x))
+  z = sample(1:2,nrow(x),replace=TRUE)
+  res = list(pi = matrix(nrow=niter,ncol=2), f0=matrix(nrow=niter, ncol=ncol(x)), f1=matrix(nrow=niter, ncol=ncol(x)), z = matrix(nrow=niter, ncol=nrow(x)))
+  res$pi[1,]=pi
+  res$f0[1,]=f0
+  res$f1[1,]=f1
+  res$z[1,]=z 
+  
+  for(i in 2:niter){
+    pi = sample_pi(z,k=2)
+    f = sample_f(x,z)
+    z = sample_z(x,f,pi)
+    res$pi[i,]=pi
+    res$f0[i,]=f[1,]
+    res$f1[i,]=f[2,]
+    res$z[i,] = z
+  }
+  return(res)
+}
+  
+```    
+
+
+## Implement this Gibbs sampler:
+
+To demonstrate that the above code (modified from the five minute state note) can estimate the unknown parameters $\pi, z$ and $f$ accurately, I'll generate data as below:
+
+```{r}
+set.seed(33)
+
+# generate from mixture of normals
+#' @param n number of samples
+#' @param f a 2 by R matrix of allele frequencies
+r_simplemix = function(n,f){
+  R = ncol(f)
+  z = sample(1:2,prob=c(0.23,0.77),size=n,replace=TRUE) #simulate z as 1 or 2
+  x = matrix(nrow = n, ncol=R)
+  for(i in 1:n){
+    x[i,] = rbinom(R,rep(1,R),f[z[i],])
+  }
+  return(list(x=x,z=z))
+}
+f = rbind(c(0.1,0.2,0.3,0.4,0.5,0.6),c(0.001,0.999,0.001,0.999,0.001,0.999))
+sim = r_simplemix(n=50,f)
+x = sim$x
+```
+
+The following are the generated data:
+
+* $f_0 = [0.1,0.2,0.3,0.4,0.5,0.6]$ 
+* $f_1 = [0.001,0.999,0.001,0.999,0.001,0.999]$
+* $pi = [0.23,0.77]$ 
+* $z =$ [`r sim$z`] 
+
+Try the Gibbs sampler on the data simulated above (10000 iterations). 
+```{r}
+  res = gibbs(x,10000)
+  table(res$z[1,],sim$z)
+  table(res$z[10000,],sim$z)
+  image(t(res$z))
+```
+
+As can be seen from the two tables, after 10000th iteration the algorithm accurately inferred the class for each datapoint (only 3 incorrect out of 50).
+
+We now see how accurately the algorithm has estimated the remaining variables: $f_0$, $f_1$ and $\pi$:
+
+```{r}
+res$pi[1,]
+res$pi[10000,]
+```
+
+After 10000th iteration, the algorithm quite accurately estimated the true $\pi = [0.23,0.77]$
+
+```{r}
+res$f0[1,]
+res$f0[10000,]
+```
+```{r}
+res$f1[1,]
+res$f1[10000,]
+```
+
+For the frequency vectors $f_0$ and $f_1$ the estimates are overall quite accurate as well, although there seem to be a few loci (4th and 6th in $f_0$ for instance) whose frequencies are somewhat inaccurately estimated.

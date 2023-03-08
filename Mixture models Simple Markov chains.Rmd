@@ -1,0 +1,388 @@
+---
+title: "Stat35450_HW3"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Problem A: Mixture Simulation
+
+## 1. Simulating from a mixture and computing the log-likelihood.
+
+### part (a) R function to simulate genetic data on tusks from a mixture distribution: that is, sampled from a population in which each tusk comes from one of K populations.
+
+```{r}
+mixture_simulation <- function(N,w,f){
+  K = length(w) # get the number of existing sub-populations K 
+  #print(K)
+  num_markers = dim(f)[2] # get the number of markers from the input matrix f
+  #print(num_markers)
+  # from range 1 to K, randomly choose N integers. Prob of occurrence is given by the input vector w
+  Z = sample.int(K, size=N, replace = TRUE, prob=w) 
+  #print(Z)
+  # For each random number in Z, perform the following:
+  ## simulate binomial for 'num_makers' number of trials, each trial's probability specified in the input matrix F.
+  X  = matrix( ,nrow = N, ncol = num_markers) # initialize the data matrix X
+  #print(X)
+  for (sample in 1:N) {
+    subpop = Z[sample] # identify which subpopulation sample belongs to.
+    #print(subpop)
+    marker = rep(0,num_markers)
+    #print(marker)
+    # for each marker, perform binomial sampling with prob for each marker specficied in the input matrix F 
+    for (i in 1:num_markers) {
+      marker[i] = rbinom(1,1,prob = f[subpop,i])
+      #print(marker)
+    }
+    #print(marker)
+    X[sample,] = marker
+    #print(X)
+  }
+  return(list("data"=X, "Z"= Z))
+}
+
+```
+
+### part (b) Write an R function to compute the log-likelihood l(w) for a data set simulated from the mixture model you have just implemented.
+
+Our likelihood function is:
+$$L(\theta|\vec X_{1},...,\vec X_{N}) =\prod_{i=1}^{N} \sum_{k=1}^{K}\pi_{k} \left[ \prod_{m=1}^{M} B(x_{im};p=F_{km}) \right]$$
+Therefore, the log-likelihood function is
+$$l(\theta) =\sum_{i=1}^{N} log \left( \sum_{k=1}^{K}\pi_{k} \left[ \prod_{m=1}^{M} B(x_{im};p=F_{km}) \right] \right )$$
+
+```{r}
+log_likelihood <-function(X,f,w){
+  N = dim(X)[1] # number of datapoints
+  M = dim(X)[2] # number of markers
+  K = length(w) # get the number of existing sub-populations K 
+  w_p = rep(0,N) # weighted probabilities; total N such probabilites will be computed by below 
+  for (n in 1:N) {
+    #print(n)
+    datapoint = X[n,]
+    prob_k = rep(0,K)
+    for (k in 1:K) {
+      freq = f[k,]
+      prob = rep(0,M) # initialize probability vector that will contain probability of each allele
+      for (m in 1:M) {
+        if (datapoint[m]==1){
+          prob[m]=freq[m]
+        }
+        else {
+          prob[m]=1-freq[m]
+        }
+      }
+      prob_k[k] = prod(prob)
+      #print(prob_k)
+    }
+    w_p[n]=sum(w*prob_k) # dot product or linear combination of probabilities weighted by weight vector w
+    #print(w_p)
+  }
+  log_like = sum(log(w_p))
+  #print(log_like)
+  return(log_like)
+}
+
+#ll = log_likelihood(X,ref_freqs,w)
+
+```
+
+### 1c) Perform a preliminary test of your likelihood and simulation programs:
+Use your simulation code to simulate data for the tusk example:  1000 tusks simulated from a mixture of 2 populations, forest and savanna, with mixture proportions w=(0.25,0.75). Use the allele frequencies for the 6 markers given in http://stephens999.github.io/fiveMinuteStats/likelihood_ratio_simple_models.html 
+
+```{r}
+ref_freqs = rbind(
+  c(0.40, 0.12,0.21,0.12,0.02,0.32),
+  c(0.80,0.20,0.11,0.17,0.23,0.25)
+)
+w = c(0.25,0.75)
+N = 1000
+simul_tusks = mixture_simulation(N,w,ref_freqs)
+```
+
+Apply your likelihood code to the simulated data set to compute the log-likelihood for w=(w_1,w_2=1-w_1), for $w_1$ in the range 0 to 1. Plot the log-likelihoood as a funtion of $w_1$ and check that it is maximized close to the true value of $w_1=0.25$ 
+
+```{r}
+X = simul_tusks$data # data simulated from mixture simulation
+
+w1 = seq(0,1,length=100)
+w2=1-w1
+log_likes = rep(0,100)
+for (i in 1:length(w1)) {
+  #print(i)
+  w = c(w1[i],w2[i])
+  log_like = log_likelihood(X,ref_freqs,w)
+  #print(log_like)
+  log_likes[i] = log_like
+}
+plot(w1,log_likes-max(log_likes),ylim=c(-10,0), type='l')
+```
+
+# Problem B: EM algorithm for estimating mixture component proportions
+
+## 1. Simulating from a mixture and computing the log-likelihood.
+
+### Write a function to implement this. The input of the function should be L , an n by K matrix of the likelihoods 
+($L_{ik} = p(x_i | Z_i = k)$) and pi.init, a K-vector of initial values for $\pi = (\pi_1,...,\pi_K).$ 
+
+```{r}
+EM <- function(L,pi.init){
+  n = dim(L)[1]
+  K = dim(L)[2]
+  niter = 300
+  pi_iters = matrix(nrow = niter+1, ncol = K)
+  pi_iters[1,] = pi.init
+  pi = pi.init # initialize pi as pi.init input vector
+  w = matrix(nrow = n, ncol = K)
+  for (iter in 1:niter) {
+    for (k in 1:K){
+      w[,k] = pi[k]*L[,k]
+    }
+    for (i in 1:n) {
+      w[i,] = w[i,]/sum(w[i,])
+    }
+    pi = colMeans(w)
+    pi_iters[iter+1,] = pi
+  }
+  return(pi_iters)
+}
+
+## This function computes L matrix used in EM function as an input:
+Compute_L <-function(X,f){
+  N = dim(X)[1] # number of datapoints
+  M = dim(X)[2] # number of markers
+  K = dim(f)[1] # get the number of existing sub-populations K 
+  L = matrix(nrow = N,ncol = K)
+  for (n in 1:N) {
+    datapoint = X[n,]
+    prob_k = rep(0,K)
+    for (k in 1:K) {
+      freq = f[k,]
+      prob = rep(0,M) # initialize probability vector that will contain probability of each allele
+      for (m in 1:M) {
+        if (datapoint[m]==1){
+          prob[m]=freq[m]
+        }
+        else {
+          prob[m]=1-freq[m]
+        }
+      }
+      prob_k[k] = prod(prob)
+    }
+    L[n,]=prob_k
+  }
+  return(L)
+}
+
+```
+
+### Test your algorithm by applying it to genetic mixture data simulated as in A. 
+
+```{r}
+L = Compute_L(simul_tusks$data, ref_freqs) # Compute L matrix with tusk simulation data matrix 
+pi.init = c(0.5,0.5) # initialize our guess that two subpopulations are equally probable.
+pi = EM(L,pi.init) # apply EM to tusk simulation
+print(pi[dim(pi)[1],]) # print pi from the last iteration.
+```
+
+### Check that the log-likelihood is increasing in each iteration:
+
+```{r}
+log_like_iter = rep(0,31)
+for (i in 1:31) { # show log-likelihood for the first 30 iterations
+  #print(log_likelihood(X,ref_freqs,pi[i,]))
+  log_like_iter[i] = log_likelihood(X,ref_freqs,pi[i,])
+}
+plot(seq(0,30),log_like_iter,xlab = 'iteration')
+```
+
+The plot shows that the log-likelihood as a function of the number of iterations increases for the simulated tusk dataset.
+
+### Check whether you get the same answer from different starting points:
+
+Here I'm testing whether the EM algorithm converges to the close enough solution when the initial pi vector differ. Specifically I'm testing when $\pi_{init} = (0.1,0.9)$ and $\pi_{init} = (0.9,0.1)$
+
+```{r}
+L = Compute_L(simul_tusks$data, ref_freqs) # Compute L matrix with tusk simulation data matrix 
+
+# starting point w = (0.1,0.9)
+pi.init = c(0.1,0.9) # initialize our guess that two subpopulations are equally probable.
+pi = EM(L,pi.init) # apply EM to tusk simulation
+print(pi[dim(pi)[1],]) # print pi from the last iteration.
+
+pi.init = c(0.9,0.1) # initialize our guess that two subpopulations are equally probable.
+pi = EM(L,pi.init) # apply EM to tusk simulation
+print(pi[dim(pi)[1],]) # print pi from the last iteration.
+```
+
+The above output shows that the EM algorithm gives the exactly the same solution even when $\pi_{init}$ was initialized with different values.
+
+
+### one more simulation with more than 2 mixture components.
+
+Here I'm adding one more subpopulation from which a tuck may come from. This subpopulation has its distinc frequency for each marker gene as specified in ref_freqs2 matrix (3rd row):
+
+```{r}
+ref_freqs2 = rbind(
+  c(0.40, 0.12,0.21,0.12,0.02,0.32),
+  c(0.80,0.20,0.11,0.17,0.23,0.25),
+  c(0.10,0.90,0.18,0.77,0.11,0.5)
+)
+w = c(0.1,0.35,0.55)
+N = 1000
+
+simul_tusks2 = mixture_simulation(N,w,ref_freqs2)
+
+```
+
+### Test EM algorith with this new dataset:
+
+```{r}
+L = Compute_L(simul_tusks2$data, ref_freqs2) # Compute L matrix with tusk simulation data matrix 
+pi.init = c(0.3,0.3,0.4) # initialize our guess that two subpopulations are equally probable.
+pi2 = EM(L,pi.init) # apply EM to tusk simulation
+print(pi2[dim(pi2)[1],]) # print pi from the last iteration.
+```
+
+### Check that the log-likelihood is increasing in each iteration:
+
+```{r}
+log_like_iter = rep(0,31)
+for (i in 1:31) { # show log-likelihood for the first 30 iterations
+  #print(log_likelihood(X,ref_freqs,pi[i,]))
+  log_like_iter[i] = log_likelihood(simul_tusks2$data,ref_freqs2,pi2[i,])
+}
+plot(seq(0,30),log_like_iter,xlab = 'iteration')
+```
+
+The plot shows that the log-likelihood as a function of the number of iterations increases for this data set as well.
+
+
+### Check whether you get the same answer from different starting points:
+
+Here I'm testing whether the EM algorithm converges to the close enough solution when the initial pi vector differ. Specifically I'm testing when $\pi_{init} = (0.1,0.1,0.8)$ and $\pi_{init} = (0.9,0.05,0.05)$
+
+```{r}
+L = Compute_L(simul_tusks2$data, ref_freqs2) # Compute L matrix with tusk simulation data matrix 
+
+# starting point w = (0.1,0.9)
+pi.init = c(0.1,0.1,0.8) # initialize our guess that two subpopulations are equally probable.
+pi = EM(L,pi.init) # apply EM to tusk simulation
+print(pi[dim(pi)[1],]) # print pi from the last iteration.
+
+pi.init = c(0.9,0.05,0.05) # initialize our guess that two subpopulations are equally probable.
+pi = EM(L,pi.init) # apply EM to tusk simulation
+print(pi[dim(pi)[1],]) # print pi from the last iteration.
+```
+
+The above output shows that the EM algorithm gives the exactly the same solution even when $\pi_{init}$ was initialized with different values.
+
+### The EM algorithm's solution is close to true values:
+
+As shown from the outputs above, the pi vector from the last iteration of the EM algorithm very closely approximate the groudtruth values in both simulation data sets.
+
+
+# Problem C: Discrete Time Markov Chains
+
+## Ross problem 4.25
+
+Consider two cases: when K = 2 (two pairs of shows) and K = 5 (five pairs of shoes).
+
+### First let's try when there were only 2 pairs of shoeses. If we form a transition matrix where each state corresponds to the number of pair of shoes there were in the front door before leaving the house (for instance the first row would be the state corresponding to no shoes in the front door), then the transition matrix would be the follwing: 
+
+$$P = \begin{bmatrix}
+    3/4       & 1/4 & 0  \\
+    1/4       & 1/2 & 1/4  \\
+    0       & 1/4 & 3/4 \\
+\end{bmatrix}$$
+
+solving $\pi P = \pi$ for $\pi$,
+
+```{r}
+library(Matrix)
+A <- matrix(c(-0.25,0.25,0,1,0.25,-0.5,0.25,1,0,0.25,-0.25,1),ncol=3,nrow = 4)
+b <- c(0,0,0,1)
+pi <- drop(solve(t(A)%*%A, t(A)%*%b))
+pi
+```
+
+conclusion: so when k=2, probability of running barefoot would be $1/3$.
+
+### Next, let's try when there were only 5 pairs of shoeses. We can construct the transition matrix in similar fashion as above:
+
+$$P = \begin{bmatrix}
+    3/4       & 1/4 & 0 & 0 & 0 & 0  \\
+    1/4       & 1/2 & 1/4 & 0 & 0 & 0  \\
+    0       & 1/4 & 1/2 & 1/4 & 0 & 0 \\
+    0       & 0 & 1/4 & 1/2 & 1/4 & 0 \\
+    0       & 0 & 0 & 1/4 & 1/2 & 1/4 \\
+    0       & 0 & 0 & 0 & 1/4 & 3/4 \\
+\end{bmatrix}$$
+
+solving $\pi P = \pi$ for $\pi$,
+
+```{r}
+#library(Matrix)
+A <- matrix(c(-0.25,0.25,0,0,0,0,1,
+              0.25,-0.5,0.25,0,0,0,1,
+              0,0.25,-0.5,0.25,0,0,1,
+              0,0,0.25,-0.5,0.25,0,1,
+              0,0,0,0.25,-0.5,0.25,1,
+              0,0,0,0,0.25,-0.25,1),ncol=6,nrow = 7)
+b <- c(0,0,0,0,0,0,1)
+pi <- drop(solve(t(A)%*%A, t(A)%*%b))
+pi
+```
+
+conclusion: so when k=5, probability of running barefoot would be $1/6$.
+
+Generalizing from this pattern we conclude that with k pairs of running shoes, the individual will be running barefoot $1/(k+1)$ of the time.  
+
+
+# Problem C: Discrete Time Markov Chains
+
+## Ross problem 4.73
+
+Here we have the transition probability matrix (where states are in the order of Sunny, Cloudy and Rainy.)
+
+$$
+P = \begin{bmatrix}
+    0       & 1/2 & 1/2  \\
+    1/4       & 1/2 & 1/4  \\
+    1/4       & 1/4 & 1/2 \\
+\end{bmatrix}
+$$
+
+solving $\pi P = \pi$ for $\pi$,
+
+```{r}
+A <- matrix(c(-1,0.5,0.5,1,
+              0.25,-0.5,0.25,1,
+              0.25,0.25,-0.5,1),ncol=3,nrow = 4)
+b <- c(0,0,0,1)
+pi <- drop(solve(t(A)%*%A, t(A)%*%b))
+pi
+```
+
+To show this markov chain is time-reversible, we need to show the following:
+
+$$
+\pi_i P_{ij} = \pi_j P_{ji}, \forall i,j
+$$
+ Let's see this equality holds for this Markov chain:
+ 
+```{r}
+P <- matrix(c(0,0.25,0.25,
+              0.5,0.5,0.25,
+              0.5,0.25,0.5),ncol=3,nrow = 3)
+for (i in 1:3) {
+  for (j in 1:3) {
+    left = pi[i]*P[i,j]
+    right = pi[j]*P[j,i]
+    #print(left)
+    #print(right)
+    print(isTRUE(all.equal(left, right)))
+  }
+}
+```
+
+The output proves that this equality holds. Therefore the Markov chain is time-reversible.

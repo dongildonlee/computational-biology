@@ -1,0 +1,175 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+# Problem B
+
+## Part (a)
+
+```{r}
+# Simulate the data for the medical screening experiment.
+# Variables
+# n :number of individuals, p: proportion of individuals with disease.
+simulated_data <- function(n,p){
+  state = rbinom(n =n, size=1, prob=p)
+  diseased = sum(state) # number of diseased people
+  normal = n - diseased # number of normal people
+  protein_diseased = rgamma(diseased, shape = 2,scale = 1) # sample proteins 'diseased' number of times 
+  protein_normal = rgamma(normal, shape = 2, scale = 0.5 ) # sample proteins 'normal' number of times 
+  # make a dataframe
+  protein_conc = c(protein_diseased,protein_normal)
+  states = c(rep(1,diseased), rep(0,normal))
+  df = data.frame(protein_conc, states)
+  return(df)
+} 
+
+```
+
+## Part (b)
+
+```{r}
+# The function takes the protein concetration as input and return likelihood ratio
+LR <- function(protein_conc){
+  lr = dgamma(protein_conc,scale = 0.5,shape = 2)/dgamma(protein_conc,scale = 1,shape = 2)
+  return(lr)
+}
+```
+
+## Part (c)
+
+```{r}
+data = simulated_data(1000000,0.2) # using 1 million data points
+num_diseased = sum(data[,2]) # number of people diseased
+lr = LR(data[,1]) # compute all likelihood ratios based on simulated protein concentrations
+c_list = seq(1/10,10,length=1000)
+tolerance = 0.2 # if the LR falls within the range [c - 0.2|c|, c + 0.2|c|] then, it's considered "near c"
+# for each c, compute q_c
+q_c_list = rep(0,length(c_list))
+for (i in 1:length(c_list)){
+  c = c_list[i]
+  #print(c)
+  near_c_range = c(c-tolerance*abs(c),c+tolerance*abs(c))
+  #print(near_c_range)
+  near_c = lr > near_c_range[1] & lr < near_c_range[2] # True if near c
+  #print(near_c)
+  near_c_and_diseased = sum(near_c[1:num_diseased])
+  #print(near_c_and_diseased)
+  # To avoid this computation producing NaN values, when near_c is 0 we conclude q_c = 0.
+  if (sum(near_c)==0){
+    q_c = 0
+  }
+  if (sum(near_c)!=0){
+    q_c = near_c_and_diseased/sum(near_c)
+  }
+  #print(q_c)
+  q_c_list[i] = q_c
+}
+```
+
+Question: Among individuals with an LR "near" c, what proportion are truly diseased? 
+Answer: The plot below shows that this proportion, $q_{D}(c)$, is a decreasing function of c by our construction of LR, the density for normal person divided by the density for diseased person at a particular protein concentration c. The proportion of truly diseased people can be obtained by reading y value of the curve at a particular x value.
+
+Plot q_c against log10(c):
+
+```{r}
+plot(log10(c_list),q_c_list,type = 'l')
+```
+
+## Part (d) Plot
+
+```{r}
+# Theoretical q_c
+q_c_theory <-function(c){
+  q_c = 0.2/(0.8*c+0.2)
+  return(q_c)
+}
+
+# Gather simulated data and theoretical values in one dataframe.
+
+q_c_simul = q_c_list
+q_c_thry = q_c_theory(c_list)
+df_qc = data.frame(q_c_simul, q_c_thry)
+
+# Plot simulated and theoretical values on the same panel
+library(ggplot2)
+ggplot() + 
+  geom_line(data=df_qc, aes(y=q_c_simul, x=log(c_list), color = "darkred"), size=1) + 
+  geom_line(data=df_qc, aes(y=q_c_thry, x=log(c_list), color = "steelblue"), size=1) +
+  scale_colour_discrete(name = 'Experiments', labels = c("simulation", "theory"))
+```
+
+## Part (e)
+```{r}
+data2 = simulated_data(1000000,0.02) # Using 1 million datapoints
+num_diseased = sum(data2[,2]) # number of people diseased
+lr = LR(data2[,1]) # compute all likelihood ratios based on simulated protein concentrations
+c_list = seq(1/10,10,length=1000)
+tolerance = 0.2
+q_c_list = rep(0,length(c_list))
+for (i in 1:length(c_list)){
+  c = c_list[i]
+  near_c_range = c(c-tolerance*abs(c),c+tolerance*abs(c))
+  near_c = lr > near_c_range[1] & lr < near_c_range[2] # True if near c
+  near_c_and_diseased = sum(near_c[1:num_diseased])
+  # To avoid this computation producing NaN values, when near_c is 0 we conclude q_c = 0.
+  if (sum(near_c)==0){
+    q_c = 0
+  }
+  if (sum(near_c)!=0){
+    q_c = near_c_and_diseased/sum(near_c)
+  }
+  q_c_list[i] = q_c
+}
+
+q_c_theory2 <-function(c){
+  q_c = 0.02/(0.98*c+0.02)
+  return(q_c)
+}
+
+# Gather simulated data and theoretical values in one dataframe.
+
+q_c_simul = q_c_list
+q_c_thry = q_c_theory2(c_list)
+df_qc = data.frame(q_c_simul, q_c_thry)
+
+# Plot simulated and theoretical values on the same panel
+library(ggplot2)
+ggplot() + 
+  geom_line(data=df_qc, aes(y=q_c_simul, x=log(c_list), color = "darkred"), size=1) + 
+  geom_line(data=df_qc, aes(y=q_c_thry, x=log(c_list), color = "steelblue"), size=1) +
+  scale_colour_discrete(name = 'Experiments', labels = c("simulation", "theory"))
+```
+
+# Problem C Part (b)
+
+## Point estimate
+```{r}
+# Point estimates
+shape = 12; scale = 1/9
+## Mean
+mean = shape*scale
+## Median
+median = qgamma(0.5,shape=12,scale=1/9)
+print(paste("mean of the gamma distribution is ", mean))
+print(paste("median of the gamma distribution is ", median))
+```
+
+## Interval estimate
+```{r}
+lower_bound = qgamma(0.05,shape=12,scale=1/9)
+upper_bound = qgamma(0.95,shape=12,scale=1/9)
+lower_bound
+upper_bound
+```
+
+The 90% credible interval is: [`r lower_bound`,`r upper_bound`].
+
+## Plot (just to check if this makes sense..)
+```{r}
+print(paste("The 90% credible interval is: "),lower_bound)
+q = seq(0,10,length=100)
+plot(q,dgamma(q,shape=12,scale=1/9),type = 'l')
+```
